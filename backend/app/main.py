@@ -3,12 +3,15 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.accounts.login import PendingLogins
+from app.accounts.routes import router as accounts_router
 from app.admin.routes import router as admin_router
 from app.auth.routes import router as auth_router
 from app.auth.security import LoginRateLimiter
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
 from app.deps import CSRF_HEADER, csrf_guard
+from app.tg.manager import ClientManager
 
 
 def create_app(gateway=None, start_background: bool | None = None, sessionmaker=None) -> FastAPI:
@@ -22,7 +25,13 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
         if app.state.sessionmaker is None:
             engine = make_engine(settings.database_url, pool_pre_ping=True)
             app.state.sessionmaker = make_sessionmaker(engine)
+        if app.state.gateway is None:
+            from app.tg.telethon_gateway import TelethonGateway
+
+            app.state.gateway = TelethonGateway()
+        app.state.manager = ClientManager(app.state.gateway, app.state.sessionmaker)
         yield
+        await app.state.manager.stop()
         if engine is not None:
             await engine.dispose()
 
@@ -30,6 +39,7 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.state.sessionmaker = sessionmaker
     app.state.gateway = gateway
     app.state.login_limiter = LoginRateLimiter()
+    app.state.logins = PendingLogins()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.cors_origin],
@@ -39,4 +49,5 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     )
     app.include_router(auth_router)
     app.include_router(admin_router)
+    app.include_router(accounts_router)
     return app

@@ -129,8 +129,8 @@ class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("tg_accounts.id"))
-    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id"))
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("tg_accounts.id", ondelete="SET NULL"))
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id", ondelete="SET NULL"))
     text: Mapped[str] = mapped_column(Text, default="")
     run_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     status: Mapped[str] = mapped_column(String(16), default=PostStatus.SCHEDULED)
