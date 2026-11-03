@@ -1,11 +1,11 @@
-# DashChannel — Design
+# Voryx — Design
 
 Data: 2026-11-03
 Status: rascunho para aprovação
 
 ## 1. Intenção
 
-Agência de modelos adultas opera grupos/canais de **prévias +18** no Telegram. Em cada grupo, ~3 modelos postam mídia; as próprias modelos cuidam do x1/upsell no privado. O DashChannel tira o trabalho repetitivo de volta disso:
+Agência de modelos adultas opera grupos/canais de **prévias +18** no Telegram. Em cada grupo, ~3 modelos postam mídia; as próprias modelos cuidam do x1/upsell no privado. O Voryx tira o trabalho repetitivo de volta disso:
 
 - **agendar posts** de cada conta de modelo no grupo de prévias;
 - **operar os grupos** (status, membros, admins, solicitações de entrada, remover/banir);
@@ -76,8 +76,11 @@ Todo acesso ao Telethon passa por uma interface `TelegramGateway` (enviar códig
 4. Sucesso → salva `session_enc`, `api_hash_enc`, `api_id`, `phone`, `tg_user_id`, nome; registra no `ClientManager`; dispara sync de diálogos.
 - Erros mapeados: código inválido/expirado, número banido, flood wait (mostra quanto esperar).
 
-### 7.2 Importar session (contingência TData)
-`POST /accounts/{id}/session` aceita uma StringSession nova (colada pelo usuário) para reviver uma conta `dead`. Integração automática com a API do TData fica atrás de um adaptador `SessionRestorer` com implementação nula até o contrato da API do TData ser definido.
+### 7.2 Reviver conta caída
+Duas formas, ambas na tela da conta `dead`:
+- **Relogar**: o mesmo wizard do 7.1 (api_id + api_hash do my.telegram.org + código), reaproveitando o registro da conta (grupos e posts continuam ligados a ela).
+- **Importar StringSession**: `POST /accounts/{id}/session` aceita uma session colada pelo usuário (ex.: gerada no TData).
+Sem integração automática com o TData (decisão do dono).
 
 ### 7.3 Health check
 - Na inicialização e a cada 10 min por conta: `get_me()`.
@@ -131,8 +134,8 @@ Toda tabela de domínio tem `owner_id` (direto ou via FK); toda query de endpoin
 
 ## 9. Segurança
 
-- Sessions e api_hash criptografados com Fernet; chave `DASH_ENCRYPTION_KEY` só no `.env` da VPS. Nunca retornados pela API, nunca logados.
-- Login do painel: email + senha (argon2), cookie de sessão httpOnly, Secure, SameSite=Lax. Frontend e API em subdomínios do mesmo domínio (`painel.<dominio>` na Vercel, `api.<dominio>` na VPS) → cookie first-party com `Domain=.<dominio>`.
+- Sessions e api_hash criptografados com Fernet; chave `VORYX_ENCRYPTION_KEY` só no `.env` da VPS. Nunca retornados pela API, nunca logados.
+- Login do painel: email + senha (argon2), cookie de sessão httpOnly, Secure, SameSite=Lax. Frontend e API em subdomínios do mesmo domínio (`painel.voryx.pro` na Vercel, `api.voryx.pro` na VPS) → cookie first-party com `Domain=.voryx.pro`.
 - CORS só para a origem do painel, com credentials. Proteção CSRF: header custom obrigatório em métodos de escrita + SameSite.
 - Rate limit simples no login do painel (ex.: 10 tentativas/15 min por IP).
 - Isolamento: dependência FastAPI `current_user`; helpers de query que exigem `owner_id`; admin passa por bypass explícito. Testes cobrindo acesso cruzado (deve dar 404).
@@ -154,10 +157,21 @@ Toda tabela de domínio tem `owner_id` (direto ou via FK); toda query de endpoin
 
 ## 11. Deploy
 
-- Repositório Git com `backend/`, `frontend/`, `deploy/` (`docker-compose.yml`, `.env.example`, `nginx/dashchannel.conf`), `README.md` com passo a passo na VPS.
-- `docker compose up -d` sobe `app` + `postgres`; migrações Alembic rodam no start do app.
-- Comando CLI para criar o primeiro admin (`python -m app.cli create-admin`).
-- Frontend: projeto Vercel apontando para `frontend/`, env `NEXT_PUBLIC_API_URL`.
+- Repositório: `github.com/gustavohenrfs/voryx` (privado). Estrutura: `backend/`, `frontend/`, `docker-compose.yml`, `.env.example`, `deploy/nginx/voryx.conf`, `.github/workflows/`, `README.md`.
+- VPS `176.57.189.30`, pasta do projeto **`/opt/dashchannel`** (criada pelo dono; o repo é clonado nela e todo comando do README assume `cd /opt/dashchannel`).
+- DNS (Hostinger): `api.voryx.pro` → registro A para `176.57.189.30`; `painel.voryx.pro` → CNAME para a Vercel.
+- `docker compose up -d` sobe `app` + `postgres`; migrações Alembic rodam no start do app. Porta do app ligada só em `127.0.0.1`; nginx do host faz o proxy com TLS (certbot) para `api.voryx.pro`.
+- CLI para criar o primeiro admin: `docker compose exec app python -m app.cli create-admin`.
+- Frontend: projeto Vercel com root `frontend/`, env `NEXT_PUBLIC_API_URL=https://api.voryx.pro`, domínio `painel.voryx.pro`. Vercel já faz deploy automático a cada push.
+
+### 11.1 Deploy automático do backend (GitHub Actions)
+- Workflow `ci.yml` em todo push/PR: testes do backend (com Postgres de serviço) + lint/typecheck/build do frontend.
+- Workflow `deploy.yml` em push na `main`, **só se o CI passar**: conecta por SSH na VPS e roda
+  `cd /opt/dashchannel && git pull --ff-only && docker compose up -d --build app`.
+  O compose só recria o container se a imagem mudou; migrações rodam no start.
+- Setup único (README): usuário `deploy` na VPS com acesso ao docker e à pasta, chave SSH dedicada; secrets no GitHub `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`. O repo na VPS usa deploy key somente-leitura do GitHub.
+- `.env` fica só na VPS, nunca no repo nem nos secrets do GitHub.
+- Efeito colateral conhecido: cada deploy que muda o backend reconecta as contas Telegram (segundos); jobs pendentes continuam no banco.
 
 ## 12. Testes
 
@@ -170,6 +184,4 @@ Estrutura de pastas interna, nomes de módulos, componentes de UI, biblioteca de
 
 ## 14. Pendências com o dono
 
-- Domínio para `painel.` / `api.`.
-- Contrato da API do TData (para restauração automática; v1 funciona com importação manual).
-- Remoto Git e acesso à VPS para deploy.
+Nenhuma bloqueante. O dono precisa executar uma vez: registros DNS dos subdomínios, setup do usuário `deploy` + secrets do GitHub, e conectar o repo na Vercel (passos no README).
