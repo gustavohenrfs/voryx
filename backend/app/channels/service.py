@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 from sqlalchemy import delete, select
@@ -24,8 +25,11 @@ def apply_info(channel: Channel, info: DialogInfo) -> None:
         channel.access_hash = info.access_hash
 
 
-async def refresh_channel(db: AsyncSession, channel: Channel, manager: ClientManager) -> None:
-    """Refresh title/members/admins. Updates channel.status; never raises Telegram errors."""
+async def refresh_channel(db: AsyncSession, channel: Channel, manager: ClientManager, lock: bool = True) -> None:
+    """Refresh title/members/admins. Updates channel.status; never raises Telegram errors.
+
+    lock=False when the caller already holds manager.lock(account) (job handlers) —
+    asyncio.Lock is not reentrant."""
     acc = await db.get(TgAccount, channel.manager_account_id) if channel.manager_account_id else None
     if acc is None or acc.status == AccountStatus.DEAD:
         channel.status = ChannelStatus.ACCOUNT_DOWN
@@ -36,7 +40,7 @@ async def refresh_channel(db: AsyncSession, channel: Channel, manager: ClientMan
         return  # offline: keep last known data, try again next cycle
     ref = ref_of(channel)
     try:
-        async with manager.lock(acc.id):
+        async with manager.lock(acc.id) if lock else contextlib.nullcontext():
             info = await client.get_chat(ref)
             admins = await client.get_admins(ref)
     except TgFatalAuth as e:
@@ -62,7 +66,8 @@ async def refresh_channel(db: AsyncSession, channel: Channel, manager: ClientMan
 async def refresh_for_account(db: AsyncSession, account_id: int, manager: ClientManager) -> None:
     channels = (await db.execute(select(Channel).where(Channel.manager_account_id == account_id))).scalars().all()
     for ch in channels:
-        await refresh_channel(db, ch, manager)
+        # runs inside the job runner, which already holds this account's lock
+        await refresh_channel(db, ch, manager, lock=False)
     await db.commit()
 
 

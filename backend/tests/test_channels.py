@@ -70,10 +70,10 @@ async def test_refresh_all_via_sync_job(a_channel, fake, sessionmaker, app, a_ac
 
     fake.dialogs[0].member_count = 1600
     runner = JobRunner(sessionmaker, app.state.manager, HANDLERS)
-    from tests.test_jobs import _enqueue  # reuse helper
+    from tests.test_jobs import NOW, _enqueue  # reuse helper
 
     await _enqueue(sessionmaker, a_account.id, type_="sync_channels")
-    await runner.run_once()
+    await runner.run_once(NOW)
     assert (await reload(sessionmaker, Channel, a_channel["id"])).member_count == 1600
 
 
