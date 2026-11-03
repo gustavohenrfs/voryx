@@ -14,6 +14,8 @@ from app.db import make_engine, make_sessionmaker
 from app.deps import CSRF_HEADER, csrf_guard
 from app.joins.routes import router as joins_router
 from app.joins.service import ApprovalThrottle
+from app.logs.routes import router as logs_router
+from app.members.routes import router as members_router
 from app.tg.manager import ClientManager
 
 
@@ -56,4 +58,6 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.include_router(accounts_router)
     app.include_router(channels_router)
     app.include_router(joins_router)
+    app.include_router(members_router)
+    app.include_router(logs_router)
     return app
