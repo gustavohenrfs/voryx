@@ -1,7 +1,7 @@
 # Voryx — Design
 
 Data: 2026-11-03
-Status: rascunho para aprovação
+Status: aprovado (2026-11-03)
 
 ## 1. Intenção
 
@@ -158,8 +158,8 @@ Toda tabela de domínio tem `owner_id` (direto ou via FK); toda query de endpoin
 ## 11. Deploy
 
 - Repositório: `github.com/gustavohenrfs/voryx` (privado). Estrutura: `backend/`, `frontend/`, `docker-compose.yml`, `.env.example`, `deploy/nginx/voryx.conf`, `.github/workflows/`, `README.md`.
-- VPS `176.57.189.30`, pasta do projeto **`/opt/dashchannel`** (criada pelo dono; o repo é clonado nela e todo comando do README assume `cd /opt/dashchannel`).
-- DNS (Hostinger): `api.voryx.pro` → registro A para `176.57.189.30`; `painel.voryx.pro` → CNAME para a Vercel.
+- VPS `176.57.189.30`, pasta do projeto **`/opt/voryx`** (criada pelo dono, Docker e Git já instalados; o repo é clonado nela e todo comando do README assume `cd /opt/voryx`).
+- DNS (Hostinger, sem Cloudflare) — já criado pelo dono: `api.voryx.pro` A → `176.57.189.30`; `painel.voryx.pro` CNAME → Vercel.
 - `docker compose up -d` sobe `app` + `postgres`; migrações Alembic rodam no start do app. Porta do app ligada só em `127.0.0.1`; nginx do host faz o proxy com TLS (certbot) para `api.voryx.pro`.
 - CLI para criar o primeiro admin: `docker compose exec app python -m app.cli create-admin`.
 - Frontend: projeto Vercel com root `frontend/`, env `NEXT_PUBLIC_API_URL=https://api.voryx.pro`, domínio `painel.voryx.pro`. Vercel já faz deploy automático a cada push.
@@ -167,7 +167,7 @@ Toda tabela de domínio tem `owner_id` (direto ou via FK); toda query de endpoin
 ### 11.1 Deploy automático do backend (GitHub Actions)
 - Workflow `ci.yml` em todo push/PR: testes do backend (com Postgres de serviço) + lint/typecheck/build do frontend.
 - Workflow `deploy.yml` em push na `main`, **só se o CI passar**: conecta por SSH na VPS e roda
-  `cd /opt/dashchannel && git pull --ff-only && docker compose up -d --build app`.
+  `cd /opt/voryx && git pull --ff-only && docker compose up -d --build app`.
   O compose só recria o container se a imagem mudou; migrações rodam no start.
 - Setup único (README): usuário `deploy` na VPS com acesso ao docker e à pasta, chave SSH dedicada; secrets no GitHub `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`. O repo na VPS usa deploy key somente-leitura do GitHub.
 - `.env` fica só na VPS, nunca no repo nem nos secrets do GitHub.
@@ -184,4 +184,4 @@ Estrutura de pastas interna, nomes de módulos, componentes de UI, biblioteca de
 
 ## 14. Pendências com o dono
 
-Nenhuma bloqueante. O dono precisa executar uma vez: registros DNS dos subdomínios, setup do usuário `deploy` + secrets do GitHub, e conectar o repo na Vercel (passos no README).
+Nenhuma bloqueante. O dono precisa executar uma vez: setup do usuário `deploy` + secrets do GitHub, e conectar o repo na Vercel (passos no README).
