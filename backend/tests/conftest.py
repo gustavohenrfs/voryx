@@ -131,3 +131,39 @@ async def a_client(login_as, partner_a):
 @pytest.fixture
 async def b_client(login_as, partner_b):
     return await login_as(partner_b)
+
+
+# ---- telegram account fixtures ------------------------------------------
+from app.crypto import encrypt  # noqa: E402
+from app.models import AccountStatus, TgAccount  # noqa: E402
+
+
+async def make_account(sessionmaker, owner, phone="+5511900000001", status=AccountStatus.ONLINE, session=None):
+    async with sessionmaker() as s:
+        acc = TgAccount(
+            owner_id=owner.id,
+            phone=phone,
+            api_id=1,
+            api_hash_enc=encrypt("hash"),
+            session_enc=encrypt(session or f"fake-session-{phone}"),
+            status=status,
+            display_name=f"Modelo {phone}",
+        )
+        s.add(acc)
+        await s.commit()
+        await s.refresh(acc)
+        return acc
+
+
+async def reload(sessionmaker, model, obj_id):
+    async with sessionmaker() as s:
+        return await s.get(model, obj_id)
+
+
+@pytest.fixture
+async def manager(fake, sessionmaker):
+    from app.tg.manager import ClientManager
+
+    m = ClientManager(fake, sessionmaker)
+    yield m
+    await m.stop()
