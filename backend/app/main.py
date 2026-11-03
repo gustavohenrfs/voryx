@@ -8,6 +8,7 @@ from app.accounts.routes import router as accounts_router
 from app.admin.routes import router as admin_router
 from app.auth.routes import router as auth_router
 from app.auth.security import LoginRateLimiter
+from app.channels.routes import router as channels_router
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
 from app.deps import CSRF_HEADER, csrf_guard
@@ -50,4 +51,5 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(accounts_router)
+    app.include_router(channels_router)
     return app

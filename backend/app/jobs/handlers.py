@@ -1,7 +1,15 @@
-"""Job handler registry. Filled by channels/joins/posts modules."""
+"""Job handler registry. Each module's handlers are registered here."""
 
-from app.jobs.runner import Handler
+from app.channels.service import refresh_for_account
+from app.jobs.runner import Handler, JobContext
 
-HANDLERS: dict[str, Handler] = {}
+
+async def sync_channels(ctx: JobContext) -> None:
+    await refresh_for_account(ctx.db, ctx.job.payload.get("account_id", ctx.job.account_id), ctx.manager)
+
+
+HANDLERS: dict[str, Handler] = {
+    "sync_channels": sync_channels,
+}
 FAIL_HOOKS: dict[str, Handler] = {}
 RETRY_HOOKS: dict[str, Handler] = {}

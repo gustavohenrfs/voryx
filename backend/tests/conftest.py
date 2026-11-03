@@ -167,3 +167,34 @@ async def manager(fake, sessionmaker):
     m = ClientManager(fake, sessionmaker)
     yield m
     await m.stop()
+
+
+# ---- channel fixtures ----------------------------------------------------
+from app.tg.types import AdminInfo, DialogInfo  # noqa: E402
+
+CHAT_ID = -1001234567890
+
+
+def add_dialog(fake, chat_id=CHAT_ID, title="Prévias VIP", members=1500):
+    d = DialogInfo(chat_id=chat_id, access_hash=99, title=title, username=None, kind="channel", member_count=members)
+    fake.dialogs.append(d)
+    fake.admins[chat_id] = [
+        AdminInfo(user_id=1, name="Dona", rights={"creator": True}),
+        AdminInfo(user_id=2, name="Ana", rights={"invite_users": True, "ban_users": True}),
+    ]
+    return d
+
+
+@pytest.fixture
+async def a_account(sessionmaker, partner_a, app):
+    acc = await make_account(sessionmaker, partner_a)
+    await app.state.manager.start_all()
+    return acc
+
+
+@pytest.fixture
+async def a_channel(a_client, a_account, fake):
+    add_dialog(fake)
+    r = await a_client.post("/channels", json={"account_id": a_account.id, "chat_id": CHAT_ID})
+    assert r.status_code == 201, r.text
+    return r.json()
