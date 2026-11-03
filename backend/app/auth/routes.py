@@ -29,9 +29,13 @@ class UserOut(BaseModel):
 
 
 def client_ip(request: Request) -> str:
+    # X-Real-IP is overwritten by our nginx; the first X-Forwarded-For hop is client-controlled.
+    real = request.headers.get("x-real-ip")
+    if real:
+        return real.strip()
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        return fwd.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 

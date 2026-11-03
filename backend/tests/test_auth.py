@@ -48,3 +48,13 @@ async def test_logout_clears_session(admin_client):
 async def test_tampered_cookie_401(client, admin_user):
     client.cookies.set("voryx_session", "1.0.forged")
     assert (await client.get("/auth/me")).status_code == 401
+
+
+async def test_rate_limit_not_bypassed_by_spoofed_forwarded_for(client, admin_user):
+    for i in range(10):
+        headers = {**CSRF, "X-Real-IP": "203.0.113.5", "X-Forwarded-For": f"10.0.0.{i}, 203.0.113.5"}
+        r = await client.post("/auth/login", json={"email": "admin@voryx.pro", "password": "x"}, headers=headers)
+        assert r.status_code == 401
+    headers = {**CSRF, "X-Real-IP": "203.0.113.5", "X-Forwarded-For": "10.9.9.9, 203.0.113.5"}
+    r = await client.post("/auth/login", json={"email": "admin@voryx.pro", "password": "secret123"}, headers=headers)
+    assert r.status_code == 429
