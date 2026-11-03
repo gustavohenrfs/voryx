@@ -184,7 +184,7 @@ async def patch_channel(
         if body.join_mode == JoinMode.AUTO:
             from app.joins.service import enqueue_pending_auto
 
-            await enqueue_pending_auto(db, ch)
+            await enqueue_pending_auto(db, ch, request.app.state.throttle)
     await db.commit()
     return await _detail(db, ch)
 

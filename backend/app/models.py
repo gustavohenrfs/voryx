@@ -123,6 +123,7 @@ class JoinRequest(Base):
     status: Mapped[str] = mapped_column(String(16), default=JoinStatus.PENDING)
     decided_by: Mapped[str | None] = mapped_column(String(16))
     decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    queued_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
 
 class ScheduledPost(Base):

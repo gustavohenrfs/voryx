@@ -12,6 +12,8 @@ from app.channels.routes import router as channels_router
 from app.config import get_settings
 from app.db import make_engine, make_sessionmaker
 from app.deps import CSRF_HEADER, csrf_guard
+from app.joins.routes import router as joins_router
+from app.joins.service import ApprovalThrottle
 from app.tg.manager import ClientManager
 
 
@@ -41,6 +43,7 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.state.gateway = gateway
     app.state.login_limiter = LoginRateLimiter()
     app.state.logins = PendingLogins()
+    app.state.throttle = ApprovalThrottle()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.cors_origin],
@@ -52,4 +55,5 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.include_router(admin_router)
     app.include_router(accounts_router)
     app.include_router(channels_router)
+    app.include_router(joins_router)
     return app
