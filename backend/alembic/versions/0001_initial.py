@@ -2,7 +2,7 @@
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-11-03 18:04:28.096667
+Create Date: 2026-11-03 18:26:58.258917
 
 """
 from collections.abc import Sequence
@@ -133,6 +133,7 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('decided_by', sa.String(length=16), nullable=True),
     sa.Column('decided_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('queued_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['channel_id'], ['channels.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
@@ -142,17 +143,18 @@ def upgrade() -> None:
     op.create_table('scheduled_posts',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('owner_id', sa.Integer(), nullable=False),
-    sa.Column('account_id', sa.Integer(), nullable=False),
-    sa.Column('channel_id', sa.Integer(), nullable=False),
+    sa.Column('account_id', sa.Integer(), nullable=True),
+    sa.Column('channel_id', sa.Integer(), nullable=True),
     sa.Column('text', sa.Text(), nullable=False),
     sa.Column('run_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('error', sa.Text(), nullable=True),
     sa.Column('sent_message_ids', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=True),
-    sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('job_id', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.ForeignKeyConstraint(['account_id'], ['tg_accounts.id'], ),
-    sa.ForeignKeyConstraint(['channel_id'], ['channels.id'], ),
+    sa.ForeignKeyConstraint(['account_id'], ['tg_accounts.id'], ondelete='SET NULL'),
+    sa.ForeignKeyConstraint(['channel_id'], ['channels.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['owner_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

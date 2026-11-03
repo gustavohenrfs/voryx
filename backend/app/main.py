@@ -1,6 +1,8 @@
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.accounts.login import PendingLogins
@@ -36,7 +38,20 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
 
             app.state.gateway = TelethonGateway()
         app.state.manager = ClientManager(app.state.gateway, app.state.sessionmaker)
+        app.state.tasks = []
+        if start_background:
+            from app.background import start_background as start_loops
+            from app.posts.service import recover_interrupted_posts
+
+            async with app.state.sessionmaker() as db:
+                await recover_interrupted_posts(db)
+                await db.commit()
+            await app.state.manager.start_all()
+            app.state.tasks = start_loops(app)
         yield
+        for task in app.state.tasks:
+            task.cancel()
+        await asyncio.gather(*app.state.tasks, return_exceptions=True)
         await app.state.manager.stop()
         if engine is not None:
             await engine.dispose()
@@ -62,4 +77,21 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
     app.include_router(members_router)
     app.include_router(logs_router)
     app.include_router(posts_router)
+
+    @app.get("/health", tags=["health"])
+    async def health(request: Request):
+        from sqlalchemy import func, select
+
+        from app.models import TgAccount
+
+        counts = {"online": 0, "offline": 0, "dead": 0, "connecting": 0}
+        async with request.app.state.sessionmaker() as db:
+            rows = await db.execute(select(TgAccount.status, func.count()).group_by(TgAccount.status))
+            for status, n in rows.all():
+                counts[status] = n
+        return {"ok": True, "accounts": counts}
+
     return app
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
