@@ -46,8 +46,7 @@ def create_app(gateway=None, start_background: bool | None = None, sessionmaker=
             async with app.state.sessionmaker() as db:
                 await recover_interrupted_posts(db)
                 await db.commit()
-            await app.state.manager.start_all()
-            app.state.tasks = start_loops(app)
+            app.state.tasks = [asyncio.create_task(app.state.manager.start_all()), *start_loops(app)]
         yield
         for task in app.state.tasks:
             task.cancel()

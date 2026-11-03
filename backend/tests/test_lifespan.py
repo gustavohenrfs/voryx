@@ -36,7 +36,7 @@ async def test_lifespan_recovers_and_starts(fake, sessionmaker, partner_a, monke
         await s.commit()
     app = create_app(gateway=fake, start_background=True, sessionmaker=sessionmaker)
     async with app.router.lifespan_context(app):
-        assert len(app.state.tasks) == 5
+        assert len(app.state.tasks) == 6  # start_all + 5 loops
         await asyncio.sleep(0.2)
         assert (await reload(sessionmaker, TgAccount, acc.id)).status == AccountStatus.ONLINE
         transport = httpx.ASGITransport(app=app)

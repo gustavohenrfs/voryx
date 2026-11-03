@@ -11,6 +11,7 @@ import { accountName } from "@/lib/types";
 const MAX_TEXT = 4096;
 const MAX_CAPTION = 1024;
 const MAX_MEDIA = 10;
+const MAX_UPLOAD_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 500);
 
 type Item = { key: string; name: string; id?: number; mime: string; progress: number; preview?: string; error?: string };
 
@@ -57,6 +58,10 @@ export function PostForm({
     const list = Array.from(files).slice(0, room);
     if (files.length > room) toast(`No máximo ${MAX_MEDIA} mídias por post`, "error");
     for (const f of list) {
+      if (f.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        toast(`${f.name} passa de ${MAX_UPLOAD_MB} MB`, "error");
+        continue;
+      }
       const key = `${f.name}-${f.size}-${Math.random()}`;
       const preview = f.type.startsWith("image/") && typeof URL.createObjectURL === "function" ? URL.createObjectURL(f) : undefined;
       setItems((xs) => [...xs, { key, name: f.name, mime: f.type, progress: 0, preview }]);

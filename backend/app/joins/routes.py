@@ -76,8 +76,12 @@ async def refresh_requests(
 ):
     ch = await _channel_with_manager(db, channel_id, user)
     throttle, now = request.app.state.throttle, utcnow()
-    await tg_call(request.app.state.manager, ch.manager_account_id, lambda c: poll_channel(db, ch, c, throttle, now))
-    await db.commit()
+
+    async def poll_and_commit(c):
+        await poll_channel(db, ch, c, throttle, now)
+        await db.commit()  # inside the account lock (see poll_all)
+
+    await tg_call(request.app.state.manager, ch.manager_account_id, poll_and_commit)
     return await list_requests(channel_id, "pending", 200, db, user)
 
 

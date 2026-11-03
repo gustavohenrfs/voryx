@@ -66,7 +66,7 @@ export function upload(file: File, onProgress?: (pct: number) => void): Promise<
       if (xhr.status >= 200 && xhr.status < 300) resolve(data as Media);
       else reject(new ApiError(xhr.status, detailOf(data, xhr.status)));
     };
-    xhr.onerror = () => reject(new ApiError(0, "sem conexão com o servidor"));
+    xhr.onerror = () => reject(new ApiError(0, "o envio falhou (arquivo grande demais ou sem conexão)"));
     const form = new FormData();
     form.append("file", file);
     xhr.send(form);

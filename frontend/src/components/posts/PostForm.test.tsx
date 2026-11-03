@@ -60,6 +60,16 @@ describe("PostForm", () => {
     });
   });
 
+  it("rejects a file over the upload limit before sending it", async () => {
+    const user = userEvent.setup();
+    setup();
+    const big = new File(["x"], "longo.mp4", { type: "video/mp4" });
+    Object.defineProperty(big, "size", { value: 600 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText("Fotos e vídeos"), big);
+    expect(await screen.findByText(/longo\.mp4 passa de 500 MB/)).toBeInTheDocument();
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
   it("post now sends post_now without run_at", async () => {
     const user = userEvent.setup();
     setup();

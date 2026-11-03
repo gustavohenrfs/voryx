@@ -1,12 +1,13 @@
 """Scheduled post sending (job handler + hooks) and crash recovery."""
 
 import os
+from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.service import ref_of
-from app.jobs.runner import JobContext
+from app.jobs.runner import JobContext, Reschedule
 from app.logs.service import log_action
 from app.models import Channel, Job, JobStatus, PostMedia, PostStatus, ScheduledPost
 from app.tg.types import TgPermanent, TgTransient
@@ -30,15 +31,25 @@ async def send_post(ctx: JobContext) -> None:
     channel = await ctx.db.get(Channel, post.channel_id) if post.channel_id else None
     if channel is None:
         raise TgPermanent("grupo removido do painel")
+    if post.run_at > ctx.now + timedelta(seconds=1):
+        raise Reschedule(post.run_at)  # edited to a later time after the job was claimed
     paths = await media_paths(ctx.db, post.id)
     missing = [p for p in paths if not os.path.exists(p)]
     if missing:
         raise TgPermanent("mídia não encontrada no servidor")
-    # Mark as sending and commit BEFORE calling Telegram: if the process dies mid-send,
-    # recovery sees 'sending' and never re-sends (no duplicates).
-    post.status = PostStatus.SENDING
-    post.error = None
+    # Atomically claim the post (a concurrent cancel wins) and commit BEFORE calling Telegram:
+    # if the process dies mid-send, recovery sees 'sending' and never re-sends (no duplicates).
+    claimed = await ctx.db.execute(
+        update(ScheduledPost)
+        .where(ScheduledPost.id == post.id, ScheduledPost.status == PostStatus.SCHEDULED)
+        .values(status=PostStatus.SENDING, error=None)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        await ctx.db.rollback()
+        return
     await ctx.db.commit()
+    await ctx.db.refresh(post)
     try:
         ids = await ctx.client.send_post(ref_of(channel), post.text, paths)
     except TgTransient as e:
@@ -84,7 +95,11 @@ async def recover_interrupted_posts(db: AsyncSession) -> None:
         post.finished_at = now
     for job in (await db.execute(select(Job).where(Job.status == JobStatus.RUNNING))).scalars():
         if job.type == "send_post":
-            job.status = JobStatus.FAILED
-            job.last_error = INTERRUPTED
+            post = await db.get(ScheduledPost, job.payload.get("post_id"))
+            if post is not None and post.status == PostStatus.SCHEDULED:
+                job.status = JobStatus.PENDING  # claimed but never started: safe to run
+            else:
+                job.status = JobStatus.FAILED
+                job.last_error = INTERRUPTED
         else:
             job.status = JobStatus.PENDING

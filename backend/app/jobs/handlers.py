@@ -2,7 +2,7 @@
 
 from app.channels.service import refresh_for_account
 from app.jobs.runner import Handler, JobContext
-from app.joins.handlers import approve_all, approve_join, reject_join
+from app.joins.handlers import approve_all, approve_join, on_decide_fail, reject_join
 from app.posts.service import on_send_fail, on_send_retry, send_post
 
 
@@ -17,5 +17,9 @@ HANDLERS: dict[str, Handler] = {
     "approve_all": approve_all,
     "send_post": send_post,
 }
-FAIL_HOOKS: dict[str, Handler] = {"send_post": on_send_fail}
+FAIL_HOOKS: dict[str, Handler] = {
+    "send_post": on_send_fail,
+    "approve_join": on_decide_fail,
+    "reject_join": on_decide_fail,
+}
 RETRY_HOOKS: dict[str, Handler] = {"send_post": on_send_retry}

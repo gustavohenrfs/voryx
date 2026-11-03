@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.service import ref_of
@@ -205,10 +205,14 @@ async def patch_post(
 @router.delete("/posts/{post_id}")
 async def cancel_post(post_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(current_user)):
     post = await get_owned(db, ScheduledPost, post_id, user)
-    if post.status != PostStatus.SCHEDULED:
+    res = await db.execute(
+        update(ScheduledPost)
+        .where(ScheduledPost.id == post.id, ScheduledPost.status == PostStatus.SCHEDULED)
+        .values(status=PostStatus.CANCELED, finished_at=utcnow())
+        .execution_options(synchronize_session=False)
+    )
+    if res.rowcount != 1:  # already sending/sent/canceled: the sender won the race
         raise HTTPException(409, "só dá para cancelar posts agendados")
-    post.status = PostStatus.CANCELED
-    post.finished_at = utcnow()
     job = await db.get(Job, post.job_id) if post.job_id else None
     if job is not None and job.status == JobStatus.PENDING:
         job.status, job.last_error = JobStatus.FAILED, "cancelado"

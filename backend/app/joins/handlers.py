@@ -71,3 +71,10 @@ async def approve_all(ctx: JobContext) -> None:
         channel_id=channel.id,
         target=f"{len(rows)} solicitações",
     )
+
+
+async def on_decide_fail(ctx: JobContext) -> None:
+    """A failed approve/reject must not leave the request stuck in the queue."""
+    jr = await ctx.db.get(JoinRequest, ctx.job.payload.get("join_request_id"))
+    if jr is not None and jr.status == JoinStatus.PENDING:
+        jr.queued_at = None

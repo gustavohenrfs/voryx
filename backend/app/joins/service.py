@@ -137,7 +137,7 @@ async def poll_all(sessionmaker, manager: ClientManager, throttle: ApprovalThrot
                 client = manager.get(acc.id)
                 async with manager.lock(acc.id):
                     await poll_channel(db, ch, client, throttle, now)
-                await db.commit()
+                    await db.commit()  # inside the lock: overlapping polls must see each other's rows
             except AccountUnavailable:
                 await db.rollback()
             except TgFatalAuth as e:

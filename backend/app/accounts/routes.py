@@ -212,6 +212,8 @@ async def import_session(
     acc.tg_user_id, acc.display_name = me.id, me.name
     await db.commit()
     await request.app.state.manager.add(acc.id, session)
+    db.add(Job(type="sync_channels", payload={"account_id": acc.id}, account_id=acc.id))
+    await db.commit()
     await db.refresh(acc)
     return AccountOut.of(acc)
 

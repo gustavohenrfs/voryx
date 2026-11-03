@@ -86,15 +86,6 @@ def _display_name(u) -> str:
     return " ".join(p for p in (getattr(u, "first_name", None), getattr(u, "last_name", None)) if p) or str(u.id)
 
 
-def _input_peer(ref: ChatRef):
-    real_id, peer_type = utils.resolve_id(ref.chat_id)
-    if peer_type is types.PeerChannel:
-        return types.InputPeerChannel(real_id, ref.access_hash or 0)
-    if peer_type is types.PeerChat:
-        return types.InputPeerChat(real_id)
-    raise TgPermanent("referência de chat inválida")
-
-
 def _kind(entity) -> str:
     if isinstance(entity, types.Channel):
         return "channel" if entity.broadcast else "supergroup"
@@ -135,6 +126,28 @@ class TelethonLogin:
 class TelethonClient:
     def __init__(self, client: TelegramClient) -> None:
         self.c = client
+        self._peers: dict[int, object] = {}
+
+    async def _peer(self, ref: ChatRef):
+        """Input peer valid for THIS account. Channel access_hash differs per user account, so the
+        hash stored with the channel (from the importing account) is never trusted here."""
+        real_id, peer_type = utils.resolve_id(ref.chat_id)
+        if peer_type is types.PeerChat:
+            return types.InputPeerChat(real_id)
+        if peer_type is not types.PeerChannel:
+            raise TgPermanent("referência de chat inválida")
+        cached = self._peers.get(ref.chat_id)
+        if cached is not None:
+            return cached
+        for attempt in range(2):
+            try:
+                peer = await self.c.get_input_entity(types.PeerChannel(real_id))
+                self._peers[ref.chat_id] = peer
+                return peer
+            except ValueError:
+                if attempt == 0:
+                    await _call(self.c.get_dialogs(limit=None))  # fills this account's entity cache
+        raise TgPermanent("a conta não participa deste grupo")
 
     async def _user_input(self, ref: ChatRef, user_id: int):
         try:
@@ -175,7 +188,7 @@ class TelethonClient:
         return out
 
     async def get_chat(self, ref: ChatRef) -> DialogInfo:
-        peer = _input_peer(ref)
+        peer = await self._peer(ref)
         if isinstance(peer, types.InputPeerChannel):
             full = await _call(self.c(functions.channels.GetFullChannelRequest(peer)))
             count = full.full_chat.participants_count
@@ -196,7 +209,7 @@ class TelethonClient:
         )
 
     async def get_admins(self, ref: ChatRef) -> list[AdminInfo]:
-        peer = _input_peer(ref)
+        peer = await self._peer(ref)
         users = await _call(self.c.get_participants(peer, filter=types.ChannelParticipantsAdmins()))
         out = []
         for u in users:
@@ -212,7 +225,7 @@ class TelethonClient:
         res = await _call(
             self.c(
                 functions.messages.GetChatInviteImportersRequest(
-                    peer=_input_peer(ref),
+                    peer=await self._peer(ref),
                     requested=True,
                     offset_date=None,
                     offset_user=types.InputUserEmpty(),
@@ -234,26 +247,32 @@ class TelethonClient:
     async def decide_request(self, ref: ChatRef, user_id: int, approve: bool) -> None:
         user = await self._user_input(ref, user_id)
         await _call(
-            self.c(functions.messages.HideChatJoinRequestRequest(peer=_input_peer(ref), user_id=user, approved=approve))
+            self.c(
+                functions.messages.HideChatJoinRequestRequest(
+                    peer=await self._peer(ref), user_id=user, approved=approve
+                )
+            )
         )
 
     async def approve_all(self, ref: ChatRef) -> None:
-        await _call(self.c(functions.messages.HideAllChatJoinRequestsRequest(peer=_input_peer(ref), approved=True)))
+        await _call(
+            self.c(functions.messages.HideAllChatJoinRequestsRequest(peer=await self._peer(ref), approved=True))
+        )
 
     async def search_members(self, ref: ChatRef, query: str, offset: int, limit: int) -> list[MemberInfo]:
-        users = await _call(self.c.get_participants(_input_peer(ref), search=query, limit=offset + limit))
+        users = await _call(self.c.get_participants(await self._peer(ref), search=query, limit=offset + limit))
         return [MemberInfo(user_id=u.id, name=_display_name(u), username=u.username) for u in users[offset:]]
 
     async def kick(self, ref: ChatRef, user_id: int) -> None:
         user = await self._user_input(ref, user_id)
-        await _call(self.c.kick_participant(_input_peer(ref), user))
+        await _call(self.c.kick_participant(await self._peer(ref), user))
 
     async def ban(self, ref: ChatRef, user_id: int) -> None:
         user = await self._user_input(ref, user_id)
-        await _call(self.c.edit_permissions(_input_peer(ref), user, view_messages=False))
+        await _call(self.c.edit_permissions(await self._peer(ref), user, view_messages=False))
 
     async def can_post(self, ref: ChatRef) -> bool:
-        entity = await _call(self.c.get_entity(_input_peer(ref)))
+        entity = await _call(self.c.get_entity(await self._peer(ref)))
         if getattr(entity, "creator", False):
             return True
         rights = getattr(entity, "admin_rights", None)
@@ -265,7 +284,7 @@ class TelethonClient:
         return not (banned and banned.send_messages)
 
     async def send_post(self, ref: ChatRef, text: str, media_paths: list[str]) -> list[int]:
-        peer = _input_peer(ref)
+        peer = await self._peer(ref)
         if not media_paths:
             msg = await _call(self.c.send_message(peer, text))
             return [msg.id]
@@ -291,8 +310,19 @@ class TelethonGateway:
 
     async def connect(self, session: str, api_id: int, api_hash: str) -> TelethonClient:
         client = _new_client(session, api_id, api_hash)
-        await _call(client.connect())
-        if not await _call(client.is_user_authorized()):
+        try:
+            await _call(client.connect())
+            me = await _call(client.get_me())
+        except TgFatalAuth:
+            await client.disconnect()
+            raise
+        except TgError as e:
+            await client.disconnect()
+            # FloodWait / server errors / timeouts are NOT proof the session is dead
+            if isinstance(e, (TgFloodWait, TgTransient)):
+                raise
+            raise TgTransient(str(e)) from e
+        if me is None:
             await client.disconnect()
             raise TgFatalAuth("AuthKeyUnregisteredError")
         return TelethonClient(client)

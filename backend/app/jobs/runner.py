@@ -44,8 +44,12 @@ async def enqueue(
     return job
 
 
-class _Retry(Exception):
-    pass
+class Reschedule(Exception):
+    """Raised by a handler to push its job to a later time without counting an attempt."""
+
+    def __init__(self, run_at: datetime):
+        super().__init__(f"reagendado para {run_at.isoformat()}")
+        self.run_at = run_at
 
 
 class JobRunner:
@@ -76,19 +80,60 @@ class JobRunner:
             for j in jobs:
                 j.status = JobStatus.RUNNING
             await db.commit()
-            return [j.id for j in jobs]
+            return [(j.id, j.account_id) for j in jobs]
 
     async def run_once(self, now: datetime | None = None) -> int:
         now = now or utcnow()
-        ids = await self._claim(now)
-        for job_id in ids:
+        claimed = await self._claim(now)
+        groups: dict[int | None, list[int]] = {}
+        for job_id, account_id in claimed:
+            groups.setdefault(account_id, []).append(job_id)
+        # accounts run concurrently (one long upload must not block other accounts);
+        # jobs of the same account stay sequential
+        await asyncio.gather(*(self._run_group(account_id, ids, now) for account_id, ids in groups.items()))
+        return len(claimed)
+
+    async def _run_group(self, account_id: int | None, ids: list[int], now: datetime) -> None:
+        for i, job_id in enumerate(ids):
             try:
-                await self._process(job_id, now)
+                flood_s = await self._process(job_id, now)
             except Exception:  # noqa: BLE001 - never let one job kill the loop
                 log.exception("job %s crashed the runner", job_id)
-        return len(ids)
+                continue
+            if flood_s is not None and account_id is not None:
+                await self._push_back_account(account_id, ids[i + 1 :], now, flood_s)
+                return
 
-    async def _process(self, job_id: int, now: datetime) -> None:
+    async def _push_back_account(self, account_id: int, claimed_rest: list[int], now: datetime, flood_s: int):
+        """After a FloodWait, keep the account quiet: shift its other jobs past the wait, keeping their spacing."""
+        delay = timedelta(seconds=flood_s + 5)
+        until = now + delay
+        async with self.sessionmaker() as db:
+            rest = (
+                (await db.execute(select(Job).where(Job.id.in_(claimed_rest)))).scalars().all() if claimed_rest else []
+            )
+            pending = (
+                (
+                    await db.execute(
+                        select(Job).where(
+                            Job.account_id == account_id, Job.status == JobStatus.PENDING, Job.run_at < until
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            seen = set()
+            for job in [*rest, *pending]:
+                if job.id in seen:
+                    continue
+                seen.add(job.id)
+                job.status = JobStatus.PENDING
+                job.run_at = max(job.run_at, now) + delay
+            await db.commit()
+
+    async def _process(self, job_id: int, now: datetime) -> int | None:
+        """Runs one job. Returns the FloodWait seconds if the account got rate-limited."""
         async with self.sessionmaker() as db:
             job = await db.get(Job, job_id)
             handler = self.handlers.get(job.type)
@@ -114,6 +159,13 @@ class JobRunner:
                         await handler(ctx)
                 else:
                     await handler(ctx)
+            except Reschedule as e:
+                await db.rollback()
+                job = await db.get(Job, job_id)
+                job.status = JobStatus.PENDING
+                job.run_at = e.run_at
+                await db.commit()
+                return None
             except TgFloodWait as e:
                 await db.rollback()
                 job = await db.get(Job, job_id)
@@ -122,7 +174,7 @@ class JobRunner:
                 job.last_error = f"flood wait {e.seconds}s"
                 await self._hook(self.retry_hooks, db, job, client, now)
                 await db.commit()
-                return
+                return e.seconds
             except TgTransient as e:
                 await db.rollback()
                 job = await db.get(Job, job_id)

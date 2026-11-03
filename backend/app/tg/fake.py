@@ -1,5 +1,7 @@
 """In-memory TelegramGateway for tests and local development."""
 
+import asyncio
+
 from app.tg.types import (
     AdminInfo,
     ChatRef,
@@ -31,6 +33,7 @@ class FakeGateway:
         self.fail_next: dict[str, Exception] = {}
         self.calls: list[tuple] = []
         self._next_msg_id = 1000
+        self.connect_delay = 0.0
 
     # -- helpers for tests
     def _maybe_fail(self, method: str) -> None:
@@ -49,6 +52,8 @@ class FakeGateway:
 
     async def connect(self, session: str, api_id: int, api_hash: str) -> "FakeClient":
         self.calls.append(("connect", session))
+        if self.connect_delay:
+            await asyncio.sleep(self.connect_delay)
         self._maybe_fail("connect")
         if session in self.dead_sessions:
             raise TgFatalAuth("AuthKeyUnregisteredError")
